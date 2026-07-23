@@ -69,8 +69,6 @@ int main() {
 	cout << "Header: " << header << endl;
 	cout << "Header len: " << header->len << endl;
 
-	cout << "data: " << endl;
-
 	if (header->caplen >= 6) {
 		cout << "Мак адресс получателя: ";
 		for (int i = 0; i < 6; i++) {
@@ -99,9 +97,23 @@ int main() {
 				cout << "Protocol: ";
 				if (protocol == 6) {
 					cout << "TCP. \n";
+					if (header->caplen >= 54) {
+						uint16_t sourcePort = (pktdata[34] << 8) | pktdata[35];
+						uint16_t destinationPort = (pktdata[36] << 8) | pktdata[37];
+						
+						cout << "Source port: " << sourcePort << ". \n";
+						cout << "Destination port: " << destinationPort << ". \n";
+					}
 				}
-				else if(protocol == 17){
+				else if (protocol == 17) {
 					cout << "UDP. \n";
+					if (header->caplen >= 42) {
+						uint16_t sourcePort = (pktdata[34] << 8) | pktdata[35];
+						uint16_t destinationPort = (pktdata[36] << 8) | pktdata[37];
+
+						cout << "Source port: " << sourcePort << ". \n";
+						cout << "Destination port: " << destinationPort << ". \n";
+					}
 				}
 				else if (protocol == 1) {
 					cout << "ICMP. \n";
@@ -109,6 +121,18 @@ int main() {
 				else {
 					cout << protocol << "\n";
 				}
+
+				cout << "Source Address: ";
+				for (int i = 0; i < 4; i++) { 
+					cout << dec << (int)pktdata[26 + i] << (i == 3 ? "" : ".");
+				}
+				cout << ". \n";
+
+				cout << "Destination Address: ";
+				for (int i = 0; i < 4; i++) {
+					cout << dec << (int)pktdata[30 + i] << (i == 3 ? "" : ".");
+				}
+				cout << ". \n";
 			}
 		}
 		else if (etherType == 0x86DD) {
@@ -151,20 +175,25 @@ int main() {
 		}
 		else if (etherType == 0x0806) {
 			cout << " (ARP). \n";
+			if (header->caplen >= 38) {
+				uint16_t hardwareType = (pktdata[14] << 8) | pktdata[15];
+				uint16_t protocolType = (pktdata[16] << 8) | pktdata[17];
+
+				if (hardwareType == 1) {
+					cout << "Hardware protocol: Ethernet";
+					cout << ". \n";
+				}
+
+				if (protocolType == 0x0800) {
+					cout << "Protocol type: IPv4";
+					cout << ". \n";
+				}
+			}
 		}
 		else {
 			cout << " (Неизвестный протокол). \n";
 		}
 		
-	}
-
-	for (int i = 0; i < header->caplen; i++) {
-
-		cout << hex << uppercase << (int)pktdata[i] << " ";
-		
-		if ((i + 1) % 16 == 0) {
-			cout << "\n";
-		}
 	}
 	
 	pcap_close(handle);
