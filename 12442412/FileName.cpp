@@ -3,195 +3,182 @@
 #include <pcap.h>
 #include <cstdint>
 #include <iomanip>
+#include <format>
+#include <span>
 
 #pragma comment(lib, "wpcap.lib")
 #pragma comment(lib, "ws2_32.lib")
 
-using namespace std;
 
 int main() {
 	setlocale(LC_ALL, "RU");
 	
-	char errBuff[PCAP_ERRBUF_SIZE];
+	char err_buff[PCAP_ERRBUF_SIZE];
 
 	pcap_if_t* alldevs;
 
-	if (pcap_findalldevs(&alldevs, errBuff) == -1) {
-		cout << "Ошибка поиска устройств: " << errBuff << endl;
+	if (pcap_findalldevs(&alldevs, err_buff) == -1) {
+		std::cout << "Ошибка поиска устройств: " << err_buff << std::endl;
 		return -1;
 	}
 
 	if (alldevs == nullptr) {
-		cout << "Сетевые интерфейсы не найдены!" << endl;
+		std::cout << "Сетевые интерфейсы не найдены!" << std::endl;
 		return -1;
 	}
 
-	pcap_if_t* targetDevice = nullptr;
+	pcap_if_t* target_device = nullptr;
 
 	for (pcap_if_t* n = alldevs; n != nullptr; n = n->next) {
 		if (n->description != nullptr) {
-			string desc(n->description);
+			std::string desc(n->description);
 
-			if (desc.find("Realtek") != string::npos) {
-				targetDevice = n;
+			if (desc.find("Realtek") != std::string::npos) {	
+				target_device = n;
 				break;
 			}
 		}
 	}
 
-	if (targetDevice == nullptr) {
-		cout << "Нужный сетевой адаптер не найден." << endl;
+	if (target_device == nullptr) {
+		std::cout << "Нужный сетевой адаптер не найден." << std::endl;
 		pcap_freealldevs(alldevs);
 		return -1;
 	}
 
-	cout << targetDevice->description << endl;
+	std::cout << target_device->description << std::endl;
 
-	pcap_t* handle = pcap_open_live(targetDevice->name, 65535, 1, 1000, errBuff);
+	pcap_t* handle = pcap_open_live(target_device->name, 65535, 1, 1000, err_buff);
 	
 	if (handle == nullptr) {
-		cout << "Интерфейс не открылся." << errBuff << endl;
+		std::cout << "Интерфейс не открылся." << err_buff << std::endl;
 		pcap_freealldevs(alldevs);
 		return -1;
 	}
 
-	cout << handle << endl;
+	std::cout << handle << std::endl;
 
 	pcap_pkthdr* header;
 	const u_char* pktdata;
 	if (pcap_next_ex(handle, &header, &pktdata) != 1) {
-		cout << "Произошла ошибка." << endl;
+		std::cout << "Произошла ошибка." << std::endl;
 		pcap_close(handle);
 		pcap_freealldevs(alldevs);
 		return -1;
 	}
 
-	cout << "Header: " << header << endl;
-	cout << "Header len: " << header->len << endl;
+	std::span<const uint8_t> packet(pktdata, header->caplen);
 
-	if (header->caplen >= 6) {
-		cout << "Мак адресс получателя: ";
-		for (int i = 0; i < 6; i++) {
-			cout << hex << uppercase << setfill('0') << setw(2) << (int)pktdata[i] << (i == 5 ? "" : ":");
-		}
-		cout << "\n";
-	}
+	std::cout << std::format("Header: {:p}.\n", static_cast<void*>(header));
 
-	if (header->caplen >= 12) {
-		cout << "Мак адресс отправителя: ";
-		for (int i = 6; i < 12; i++) {
-			cout << hex << uppercase << setfill('0') << setw(2) << (int)pktdata[i] << (i == 11 ? "" : ":");
-		}
-		cout << "\n";
-	}
+	std::cout << std::format("Header len: {}.\n", header->len);
 
-	if (header->caplen >= 14) {
-		uint16_t etherType = (pktdata[12] << 8) | pktdata[13];
+	if (packet.size() >= 14) {
+		auto mac_dst = packet.first<6>();
+		auto mac_src = packet.subspan<6, 6>();
 
-		cout << "EtherType: 0x" << hex << uppercase << etherType;
+		auto ether_type_bytes = packet.subspan<12, 2>();  
+		uint16_t ether_type = (ether_type_bytes[0] << 8) | ether_type_bytes[1];
 
-		if (etherType == 0x0800) {
-			cout << " (IPv4). \n";
-			if (header->caplen >= 34) {
+		std::cout << std::format("Destination Mac address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}.\n", mac_dst[0], mac_dst[1], mac_dst[2], mac_dst[3], mac_dst[4], mac_dst[5]);
+		std::cout << std::format("Source Mac address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}.\n", mac_src[0], mac_src[1], mac_src[2], mac_src[3], mac_src[4], mac_src[5]);
+
+		std::cout << std::format("EtherType {:#06X}", ether_type);
+
+		if (ether_type == 0x0800) {
+			std::cout << " (IPv4). \n";
+			if (packet.size() >= 34) {
 				int protocol = pktdata[23];
-				cout << "Protocol: ";
+				std::cout << "Protocol: ";
 				if (protocol == 6) {
-					cout << "TCP. \n";
+					std::cout << "TCP. \n";
 					if (header->caplen >= 54) {
-						uint16_t sourcePort = (pktdata[34] << 8) | pktdata[35];
-						uint16_t destinationPort = (pktdata[36] << 8) | pktdata[37];
+						uint16_t source_port = (pktdata[34] << 8) | pktdata[35];
+						uint16_t destination_port = (pktdata[36] << 8) | pktdata[37];
 						
-						cout << "Source port: " << sourcePort << ". \n";
-						cout << "Destination port: " << destinationPort << ". \n";
+						std::cout << std::format("Source port: {}.\n", source_port);
+						std::cout << std::format("Destination port: {}.\n", destination_port);
 					}
 				}
 				else if (protocol == 17) {
-					cout << "UDP. \n";
+					std::cout << "UDP. \n";
 					if (header->caplen >= 42) {
-						uint16_t sourcePort = (pktdata[34] << 8) | pktdata[35];
-						uint16_t destinationPort = (pktdata[36] << 8) | pktdata[37];
+						uint16_t source_port = (pktdata[34] << 8) | pktdata[35];
+						uint16_t destination_port = (pktdata[36] << 8) | pktdata[37];
 
-						cout << "Source port: " << sourcePort << ". \n";
-						cout << "Destination port: " << destinationPort << ". \n";
+						std::cout << std::format("Source port: {}.\n", source_port);
+						std::cout << std::format("Destination port: {}.\n", destination_port);
 					}
 				}
 				else if (protocol == 1) {
-					cout << "ICMP. \n";
+					std::cout << "ICMP. \n";
 				}
 				else {
-					cout << protocol << "\n";
+					std::cout << protocol << "\n";
 				}
 
-				cout << "Source Address: ";
+				std::cout << "Source Address: ";
 				for (int i = 0; i < 4; i++) { 
-					cout << dec << (int)pktdata[26 + i] << (i == 3 ? "" : ".");
+					std::cout << std::format("{:d}{}", pktdata[26 + i], i == 3 ? "" : ".");
 				}
-				cout << ". \n";
+				std::cout << ". \n";
 
-				cout << "Destination Address: ";
+				std::cout << "Destination Address: ";
 				for (int i = 0; i < 4; i++) {
-					cout << dec << (int)pktdata[30 + i] << (i == 3 ? "" : ".");
+					std::cout << std::format("{:d}{}", pktdata[30 + i], i == 3 ? "" : ".");
 				}
-				cout << ". \n";
+				std::cout << ". \n";
 			}
 		}
-		else if (etherType == 0x86DD) {
-			cout << " (IPv6). \n";
+		else if (ether_type == 0x86DD) {
+			std::cout << " (IPv6). \n";
 
 			if (header->caplen >= 54) {
-				int nextHeader = pktdata[20];
+				int next_header = pktdata[20];
 
-				cout << "Protocol (Next Header): ";
-				if (nextHeader == 6) {
-					cout << "TCP. \n";
+				std::cout << "Protocol (Next Header): ";
+				if (next_header == 6) {
+					std::cout << "TCP. \n";
 				}
-				else if (nextHeader == 17) {
-					cout << "UDP. \n";
+				else if (next_header == 17) {
+					std::cout << "UDP. \n";
 				}
-				else if (nextHeader == 58) {
-					cout << "ICMPv6. \n";
+				else if (next_header == 58) {
+					std::cout << "ICMPv6. \n";
 				}
 
-				cout << "Source Address: ";
+				std::cout << "Source Address: ";
 				for (int i = 0; i < 16; i += 2) {
 					uint16_t src_address = (pktdata[22 + i] << 8) | pktdata[22 + i + 1];
-					cout << hex << uppercase << setfill('0') << setw(4) << src_address;
-					if (i < 14) {
-						cout << ":";
-					}
+					std::cout << std::format("{:04X}{}", src_address, i < 14 ? ":" : "" );
 				}
-				cout << ". \n";
+				std::cout << ". \n";
 
-				cout << "Destination Address: ";
+				std::cout << "Destination Address: ";
 				for (int i = 0; i < 16; i += 2) {
 					uint16_t dest_address = (pktdata[38 + i] << 8) | pktdata[38 + i + 1];
-					cout << hex << uppercase << setfill('0') << setw(4) << dest_address;
-					if (i < 14) {
-						cout << ":";
-					}
+					std::cout << std::format("{:04X}{}", dest_address, i < 14 ? ":" : "");
 				}
-				cout << ". \n";
+				std::cout << ". \n";
 			}
 		}
-		else if (etherType == 0x0806) {
-			cout << " (ARP). \n";
+		else if (ether_type == 0x0806) {
+			std::cout << " (ARP). \n";
 			if (header->caplen >= 38) {
-				uint16_t hardwareType = (pktdata[14] << 8) | pktdata[15];
-				uint16_t protocolType = (pktdata[16] << 8) | pktdata[17];
+				uint16_t hardware_type = (pktdata[14] << 8) | pktdata[15];
+				uint16_t protocol_type = (pktdata[16] << 8) | pktdata[17];
 
-				if (hardwareType == 1) {
-					cout << "Hardware protocol: Ethernet";
-					cout << ". \n";
+				if (hardware_type == 1) {
+					std::cout << "Hardware protocol: Ethernet.\n";
 				}
 
-				if (protocolType == 0x0800) {
-					cout << "Protocol type: IPv4";
-					cout << ". \n";
+				if (protocol_type == 0x0800) {
+					std::cout << "Protocol type: IPv4.\n";
 				}
 			}
 		}
 		else {
-			cout << " (Неизвестный протокол). \n";
+			std::cout << " (Неизвестный протокол). \n";
 		}
 		
 	}
